@@ -6,6 +6,7 @@ runtime/*.sqlite3-journal
 runtime/*.png
 runtime/*.json
 runtime/*.txt
+runtime/service.log
 runtime/screenshots/
 runtime/logs/
 data/

@@ -118,3 +118,15 @@ uv run python -m unittest discover -s tests -v
 ```
 
 停止可视化服务时，在运行它的终端按 `Ctrl+C`。
+
+## 启动管理服务
+
+在项目根目录双击 [`start_service.bat`](start_service.bat)，或在终端执行：
+
+```powershell
+.\start_service.bat
+```
+
+服务地址：`http://127.0.0.1:8765/`
+
+如果服务已经运行，脚本会直接打开管理页面；如果尚未运行，脚本会在后台启动服务，等待服务就绪后自动打开页面。启动日志写入 `runtime/service.log`。
