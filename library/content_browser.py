@@ -58,8 +58,11 @@ def _load_thread(url, attempts=3, settle=False):
         for delay in (0.75,1.5,2.25):
             _time.sleep(delay)
             candidate=_state(); state=candidate
-            if candidate.get('ready') and candidate.get('buy'):
-                if settle: _time.sleep(2)
+            if candidate.get('ready'):
+                if settle:
+                    # 首次主题页：正文 ready 后再等购买入口的延迟渲染。
+                    _time.sleep(2)
+                    candidate=_state()
                 return candidate,attempt
         if state.get('ready'):
             if settle and state.get('buy'): _time.sleep(2)

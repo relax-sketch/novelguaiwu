@@ -69,9 +69,11 @@ def _load_thread(url, attempts=3):
         for delay in (0.75,1.5,2.25):
             _time.sleep(delay)
             candidate=_thread_state(); state=candidate
-            if candidate.get('ready') and candidate.get('buy'):
+            if candidate.get('ready'):
+                # 主题正文先于购买入口出现，ready 只表示页面主体已经可读。
+                # 等待延迟渲染完成后再查一次购买链接，避免收费帖被误判为已购买。
                 _time.sleep(2)
-                return candidate,attempt
+                settled=_thread_state(); return settled,attempt
         if state.get('ready'):
             return state,attempt
     return state,attempts
