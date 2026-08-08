@@ -140,11 +140,16 @@ for item in _cfg['candidates']:
 '''
 
 
-def run_content_browser(candidates: Iterable[dict[str, Any]], *, execute: bool, max_price: int = 3, min_balance: int = 0, download_limit: int = 1, max_pages_per_work: int = 6, timeout: int = 1800) -> list[dict[str, Any]]:
-    proc = run_harness(browser_program(candidates, execute=execute, max_price=max_price, min_balance=min_balance, download_limit=download_limit, max_pages_per_work=max_pages_per_work), timeout=timeout)
+def run_content_browser(candidates: Iterable[dict[str, Any]], *, execute: bool, max_price: int = 3, min_balance: int = 0, download_limit: int = 1, max_pages_per_work: int = 6, timeout: int = 1800, on_result: Any | None = None) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    def handle_line(line: str) -> None:
+        if not line.startswith(MARKER): return
+        result = json.loads(line[len(MARKER):]); results.append(result)
+        if on_result: on_result(result)
+    proc = run_harness(browser_program(candidates, execute=execute, max_price=max_price, min_balance=min_balance, download_limit=download_limit, max_pages_per_work=max_pages_per_work), timeout=timeout, on_stdout_line=handle_line)
     if proc.returncode:
         raise RuntimeError(f"browser-harness 退出码 {proc.returncode}: {proc.stderr[-1000:]}")
-    results = [json.loads(line[len(MARKER):]) for line in proc.stdout.splitlines() if line.startswith(MARKER)]
+    if not results: results = [json.loads(line[len(MARKER):]) for line in proc.stdout.splitlines() if line.startswith(MARKER)]
     if not results:
         raise RuntimeError("browser-harness 未返回正文抓取结果")
     return results

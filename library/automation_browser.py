@@ -12,6 +12,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import queue
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,18 +126,44 @@ def ensure_browser(config: BrowserConfig | None = None) -> BrowserConfig:
     raise RuntimeError(f"专用 Chrome 未在 {config.startup_timeout:g} 秒内就绪：{config.cdp_url}")
 
 
-def run_harness(program: str, *, timeout: int, config: BrowserConfig | None = None) -> subprocess.CompletedProcess[str]:
+def _run_harness_stream_once(command: list[str], program: str, *, timeout: int, env: dict[str, str], on_stdout_line: Any | None) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], env=env)
+    assert proc.stdin and proc.stdout and proc.stderr
+    proc.stdin.write(program); proc.stdin.close()
+    events: queue.Queue[tuple[str, str | None]] = queue.Queue()
+    def pump(stream: Any, kind: str) -> None:
+        for line in stream:
+            events.put((kind, line))
+        events.put((kind, None))
+    threads = [threading.Thread(target=pump, args=(proc.stdout, "stdout"), daemon=True), threading.Thread(target=pump, args=(proc.stderr, "stderr"), daemon=True)]
+    for thread in threads: thread.start()
+    stdout_lines: list[str] = []; stderr_lines: list[str] = []; closed = set(); deadline = time.monotonic() + timeout
+    while len(closed) < 2:
+        if time.monotonic() > deadline:
+            proc.kill(); append_log("harness_timeout", timeout=timeout); break
+        try: kind, line = events.get(timeout=0.2)
+        except queue.Empty: continue
+        if line is None: closed.add(kind); continue
+        if kind == "stdout":
+            stdout_lines.append(line)
+            if on_stdout_line: on_stdout_line(line.rstrip("\r\n"))
+        else: stderr_lines.append(line)
+    proc.wait(timeout=10)
+    return subprocess.CompletedProcess(command, proc.returncode, "".join(stdout_lines), "".join(stderr_lines))
+
+
+def run_harness(program: str, *, timeout: int, config: BrowserConfig | None = None, on_stdout_line: Any | None = None) -> subprocess.CompletedProcess[str]:
     config = ensure_browser(config)
     env = config.child_env()
     env["LIBRARY_AUTOMATION_LOG"] = str(LOG_PATH)
     command = ["uv", "run", "browser-harness"]
     append_log("harness_start", timeout=timeout, daemon=config.daemon_name, program_bytes=len(program.encode("utf-8")))
-    proc = subprocess.run(command, input=program, text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=timeout, env=env)
+    proc = _run_harness_stream_once(command, program, timeout=timeout, env=env, on_stdout_line=on_stdout_line)
     append_log("harness_end", returncode=proc.returncode, stdout_bytes=len(proc.stdout.encode("utf-8")), stderr_tail=proc.stderr[-1000:])
     if proc.returncode and "PermissionError" in proc.stderr and f"bu-{config.daemon_name}.port" in proc.stderr:
         # 只重载当前项目的隔离 daemon；不删除或触碰其他项目的状态。
         subprocess.run([*command, "--reload"], text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=30, env=env)
-        proc = subprocess.run(command, input=program, text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=timeout, env=env)
+        proc = _run_harness_stream_once(command, program, timeout=timeout, env=env, on_stdout_line=on_stdout_line)
     return proc
 
 

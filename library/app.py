@@ -97,15 +97,13 @@ PAGE = PAGE.replace('${esc(w.purchase_status||"未购买")}', '${esc(w.purchase_
 PAGE = PAGE.replace("title_keyword:''", "title_keyword:$('title_keyword').value")
 PAGE = PAGE.replace('</body>', '<script>const selectedIds=()=>[...document.querySelectorAll(".pick:checked")].map(x=>x.value);window.downloadPosts=async function(mode){const message=$("actionMessage"),execute=true,thread_ids=selectedIds();if((mode==="selected"||mode==="redownload")&&!thread_ids.length){message.textContent="请先勾选帖子";return;}const count=mode==="redownload"?Math.max(1,Math.min(100,thread_ids.length)):Math.max(1,Math.min(100,Number($("download_count").value)||2)),max_price=Math.max(0,Math.min(10000,Number($("download_max_price").value)||0)),min_balance=Math.max(0,Math.min(1000000,Number($("download_min_balance").value)||0)),max_pages_per_work=Math.max(1,Math.min(100,Number($("download_max_pages").value)||6));const scope=mode==="auto"?"忽略当前筛选并按查看数降序自动下载":mode==="redownload"?"重新抓取勾选帖子的正文":mode==="current"?"下载当前筛选结果":"下载勾选帖子";if(!window.confirm(`确认${scope}，共处理 ${count} 篇？单篇不超过 ${max_price} 金币，至少保留 ${min_balance} 金币；单帖最多抓取 ${max_pages_per_work} 页。`))return;message.textContent=mode==="auto"?"正在按查看数自动购买和下载，请保持浏览器登录…":mode==="redownload"?"正在重新购买、抓取和清洗，请保持浏览器登录…":"正在购买、抓取和清洗，请保持浏览器登录…";try{const r=await fetch("/api/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode,thread_ids,filters:filterValues(),count,max_price,min_balance,max_pages_per_work,minimum_length:Number($("minimum_length").value)||200,execute})});const d=await r.json();if(!r.ok)throw Error(d.error||"下载流程失败");message.textContent=`下载完成：成功 ${d.downloaded}，跳过 ${d.skipped}，失败 ${d.failed}，停止原因：${d.stop_reason}`;await loadWorks();}catch(e){message.textContent="下载失败："+e.message;}};window.exportWorks=async function(mode){const message=$("actionMessage"),thread_ids=selectedIds();if(mode==="selected"&&!thread_ids.length){message.textContent="请先勾选已下载作品";return;}message.textContent="正在生成导出文件…";try{const r=await fetch("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode,thread_ids,filters:filterValues(),format:$("export_format").value})});const d=await r.json();if(!r.ok)throw Error(d.error||"导出失败");message.textContent=`已导出 ${d.exported} 篇：${d.path}`;}catch(e){message.textContent="导出失败："+e.message;}};</script></body>')
 PAGE = PAGE.replace("const cls=s==='已下载'?'done':s.includes('失败')?'fail':s==='有更新'?'update':'';", "const cls=s==='已下载'?'done':(s.includes('失败')||['金币超限','余额不足','页面异常'].includes(s))?'fail':s==='有更新'?'update':'';")
-PAGE = PAGE.replace('</body>', '<script>window.loadRuns=async function(){const box=$("runRows");try{const r=await fetch("/api/runs?limit=5"),d=await r.json();box.innerHTML=d.runs.length?d.runs.map(x=>{const details=(x.results||[]).filter(y=>y.thread_id&&!["已抓取","待下载"].includes(y.status)).map(y=>`${y.thread_id}：${y.reason||y.status}`).join("；");return `<div class="run-row"><strong>${esc(x.sort_type==="auto_download"?"自动下载":x.sort_type==="redownload"?"重新抓取":x.sort_type==="download"?"下载":x.sort_type==="views"?"查看扫描":"回复扫描")}</strong><span>${esc(x.stop_reason||"运行中")}${details?`<small class="run-detail" title="${esc(details)}">${esc(details)}</small>`:""}</span><span>成功 ${esc(x.downloaded_count||x.scanned_count||0)} / 失败 ${esc(x.failed_count||0)}</span><span class="${String(x.stop_reason||"").includes("异常")?"bad":"ok"}">${esc((x.finished_at||x.started_at||"").replace("T"," ").slice(0,16))}</span></div>`}).join(""):"暂无运行记录";}catch(e){box.textContent="运行记录加载失败："+e.message;}};loadRuns();</script></body>')
+PAGE = PAGE.replace('</body>', '<script>window.loadRuns=async function(){const box=$("runRows");try{const r=await fetch("/api/runs?limit=5"),d=await r.json();box.innerHTML=d.runs.length?d.runs.map(x=>{const details=(x.results||[]).filter(y=>y.thread_id&&!["已抓取","待下载"].includes(y.status)).map(y=>`${y.thread_id}：${y.reason||y.status}`).join("；");return `<div class="run-row"><strong>${esc(x.sort_type==="auto_download"?"自动下载":x.sort_type==="redownload"?"重新抓取":x.sort_type==="download"?"下载":x.sort_type==="views"?"查看扫描":"回复扫描")}</strong><span>${esc(x.stop_reason||"运行中")}${details?`<small class="run-detail" title="${esc(details)}">${esc(details)}</small>`:""}</span><span>成功 ${esc(x.downloaded_count||x.scanned_count||0)} / 失败 ${esc(x.failed_count||0)}</span><span class="${String(x.stop_reason||"").includes("异常")?"bad":"ok"}">${esc((x.finished_at||x.started_at||"").replace("T"," ").slice(0,16))}</span></div>`}).join(""):"暂无运行记录";}catch(e){box.textContent="运行记录加载失败："+e.message;}};loadRuns();setInterval(loadRuns,3000);</script></body>')
 PAGE = PAGE.replace('await loadWorks();}catch(e){message.textContent="下载失败："', 'await loadWorks();await loadRuns();}catch(e){message.textContent="下载失败："')
-
-# 用户要求隐藏独立购买面板但不要删除；金币限制已恢复到可见的下载设置中。
-# `/api/purchase`、purchase() 和原始面板 DOM 继续保留，便于以后恢复；当前可见流程统一从“下载”启动自动购买。
-PAGE = PAGE.replace('<section class="card purchase-card">', '<section class="card purchase-card" hidden>')
 PAGE = PAGE.replace('购买可在下方“购买设置”中预览或启动。', '选择查看数或回复数排序后，可按批次自动购买、抓取和保存。')
 PAGE = PAGE.replace('查看最新排序', '查看数降序')
 PAGE = PAGE.replace('</body>', '<script>(()=>{const input=$("download_max_pages"),key="library.max_pages_per_work";const saved=Number(localStorage.getItem(key));if(input&&saved>=1&&saved<=100)input.value=String(saved);input?.addEventListener("change",()=>localStorage.setItem(key,String(Math.max(1,Math.min(100,Number(input.value)||6)))));})();</script></body>')
+# 用户要求隐藏独立购买面板但不要删除；可见流程统一从“下载”启动自动购买。
+PAGE = PAGE.replace('<section class="card purchase-card">', '<section class="card purchase-card" hidden>')
 
 
 def select_rows(db_path: Path, filters: dict[str, Any] | None = None, thread_ids: list[Any] | None = None) -> list[dict[str, Any]]:
@@ -216,9 +214,26 @@ class Handler(BaseHTTPRequestHandler):
                         if not settings.force and row.get("download_status") != "已下载" and not row.get("local_path"):
                             row["existing_posts"] = db.list_posts(str(row.get("thread_id") or ""))
                     run_id = db.start_run("auto_download" if mode == "auto" else ("redownload" if mode == "redownload" else "download"), {"mode": mode, "count": count, "max_price": settings.max_price, "min_balance": settings.min_balance, "max_pages_per_work": settings.max_pages_per_work, "minimum_length": settings.minimum_length, "execute": execute, "filters": {} if mode == "auto" else raw_filters, "thread_ids": [] if mode == "auto" else thread_ids})
-                results = run_download(rows, settings)
+                streamed_results: list[dict[str, Any]] = []
+                streamed_counts = {"downloaded": 0, "failed": 0, "skipped": 0}
+                streamed_stop = "正常完成"
+                def on_download_result(result: dict[str, Any]) -> None:
+                    nonlocal streamed_stop
+                    streamed_results.append(result)
+                    d_count, f_count, s_count, reason = persist_download_results(self.db_path, [result])
+                    streamed_counts["downloaded"] += d_count; streamed_counts["failed"] += f_count; streamed_counts["skipped"] += s_count
+                    if reason != "正常完成": streamed_stop = reason
+                    with LibraryDB(self.db_path) as live_db:
+                        live_db.finish_run(run_id, downloaded_count=streamed_counts["downloaded"], failed_count=streamed_counts["failed"], skipped_count=streamed_counts["skipped"], stop_reason=streamed_stop, results=summarize_run_results(streamed_results))
+                results = run_download(rows, settings, on_result=on_download_result if execute else None)
                 if execute:
-                    downloaded, failed, skipped, stop_reason = persist_download_results(self.db_path, results)
+                    downloaded = streamed_counts["downloaded"]; failed = streamed_counts["failed"]; skipped = streamed_counts["skipped"]; stop_reason = streamed_stop
+                    if len(streamed_results) < len(results):
+                        remaining = results[len(streamed_results):]
+                        extra = persist_download_results(self.db_path, remaining)
+                        downloaded += extra[0]; failed += extra[1]; skipped += extra[2]
+                        streamed_results.extend(remaining)
+                        if extra[3] != "正常完成": stop_reason = extra[3]
                     if stop_reason == "正常完成" and downloaded >= count:
                         stop_reason = "达到本次下载篇数"
                 else:
