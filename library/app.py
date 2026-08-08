@@ -227,12 +227,15 @@ class Handler(BaseHTTPRequestHandler):
                             row["existing_posts"] = db.list_posts(str(row.get("thread_id") or ""))
                     run_id = db.start_run("auto_download" if mode == "auto" else ("redownload" if mode == "redownload" else "download"), {"mode": mode, "count": count, "max_price": settings.max_price, "min_balance": settings.min_balance, "max_pages_per_work": settings.max_pages_per_work, "minimum_length": settings.minimum_length, "execute": execute, "filters": {} if mode == "auto" else raw_filters, "thread_ids": [] if mode == "auto" else thread_ids})
                 streamed_results: list[dict[str, Any]] = []
+                persisted_thread_ids: set[str] = set()
                 streamed_counts = {"downloaded": 0, "failed": 0, "skipped": 0}
                 streamed_stop = "正常完成"
                 def on_download_result(result: dict[str, Any]) -> None:
                     nonlocal streamed_stop
                     streamed_results.append(result)
                     d_count, f_count, s_count, reason = persist_download_results(self.db_path, [result])
+                    if result.get("thread_id"):
+                        persisted_thread_ids.add(str(result["thread_id"]))
                     streamed_counts["downloaded"] += d_count; streamed_counts["failed"] += f_count; streamed_counts["skipped"] += s_count
                     if reason != "正常完成": streamed_stop = reason
                     with LibraryDB(self.db_path) as live_db:
@@ -240,8 +243,8 @@ class Handler(BaseHTTPRequestHandler):
                 results = run_download(rows, settings, on_result=on_download_result if execute else None)
                 if execute:
                     downloaded = streamed_counts["downloaded"]; failed = streamed_counts["failed"]; skipped = streamed_counts["skipped"]; stop_reason = streamed_stop
-                    if len(streamed_results) < len(results):
-                        remaining = results[len(streamed_results):]
+                    remaining = [result for result in results if str(result.get("thread_id") or "") not in persisted_thread_ids]
+                    if remaining:
                         extra = persist_download_results(self.db_path, remaining)
                         downloaded += extra[0]; failed += extra[1]; skipped += extra[2]
                         streamed_results.extend(remaining)
@@ -256,7 +259,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 append_log("app_error", path=path, run_id=run_id, error=repr(exc))
                 if run_id is not None:
-                    with LibraryDB(self.db_path) as db: db.finish_run(run_id, failed_count=1, stop_reason=f"页面异常：{type(exc).__name__}")
+                    # 浏览器进程级异常可能发生在某个帖子结果返回之前；将尚未
+                    # 返回结果的队列项逐帖标记失败，避免继续显示为“已下载”。
+                    pending_rows = [row for row in locals().get("rows", []) if str(row.get("thread_id") or "") not in locals().get("persisted_thread_ids", set())]
+                    if pending_rows:
+                        pending_results = [{"thread_id": str(row.get("thread_id") or ""), "status": "页面异常", "reason": f"批次异常：{type(exc).__name__}", "price": row.get("price"), "purchase_status": "页面异常"} for row in pending_rows]
+                        persist_download_results(self.db_path, pending_results)
+                        streamed_results.extend(pending_results)
+                    with LibraryDB(self.db_path) as db:
+                        db.finish_run(run_id, failed_count=max(1, len(pending_rows)), stop_reason=f"页面异常：{type(exc).__name__}", results=summarize_run_results(streamed_results))
                 self._send(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), 500, "application/json; charset=utf-8")
             return
         if path == "/api/export":
