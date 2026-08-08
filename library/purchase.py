@@ -37,7 +37,8 @@ def _log(value):
         with open(_log_path, 'a', encoding='utf-8') as _fh: _fh.write(_json.dumps(value, ensure_ascii=False) + '\\n'); _fh.flush()
     except Exception: pass
 def _emit(value):
-    _log({{'event':'browser_result', **value}})
+    _summary={{k:v for k,v in value.items() if k not in ('posts','post_html','raw_html')}}; _summary['post_count']=len(value.get('posts') or [])
+    _log({{'event':'browser_result', **_summary}})
     print(_marker + _json.dumps(value, ensure_ascii=False), flush=True)
 def _goto(url):
     new_tab(url) if not globals().get('_started') else goto_url(url)
@@ -72,15 +73,12 @@ def _load_thread(url, attempts=3):
                 _time.sleep(2)
                 return state,attempt
     return state,attempts
-def _load_pay(url, attempts=3):
+def _load_pay(url, attempts=1):
     pay={{'form':False,'button':None,'price':0,'balance':0}}
-    for attempt in range(1,attempts+1):
-        _goto(url)
-        for poll in range(1,4):
-            pay=_pay_state()
-            if pay.get('form') and pay.get('button'): return pay,attempt
-            _time.sleep(0.75 * poll)
-    return pay,attempts
+    try: _goto(url)
+    except Exception as _exc: _log({{'event':'pay_navigation_error','url':str(url),'attempt':1,'error':repr(_exc)}}); return pay,1
+    pay=_pay_state()
+    return pay,1
 def _verify_purchase(url, attempts=4):
     state={{'buy':None,'posts':0,'body_nodes':0,'ready':False}}
     for attempt in range(1,attempts+1):
@@ -95,44 +93,40 @@ _started=False
 _bought=0
 for item in _cfg['candidates']:
     if _bought >= int(_cfg['count']): break
-    state,thread_attempts=_load_thread(item['url'])
-    if not state.get('posts'):
-        _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页重试3次仍未找到帖子楼层','attempts':thread_attempts,'purchased':False}}); continue
-    if not state.get('buy'):
-        known_price=int(item.get('price') or 0); known_status=item.get('purchase_status') or '未购买'
-        resolved='已购买' if known_price>0 or known_status in ('已购买','购买失败','余额不足','金币超限') else '免费'
-        _emit({{'thread_id':item['thread_id'],'status':resolved,'price':known_price,'reason':'主题页没有购买链接','attempts':thread_attempts,'title':state.get('title',''),'purchased':False}})
-        continue
-    pay,pay_attempts=_load_pay(state['buy']['href']); price=int(pay.get('price') or 0)
-    if price > int(_cfg['max_price']):
-        _emit({{'thread_id':item['thread_id'],'status':'金币超限','price':price,'purchased':False,'reason':'单篇价格超过设置上限','attempts':{{'thread':thread_attempts,'pay':pay_attempts}}}}); continue
-    if _cfg.get('auto_purchase') and int(pay.get('balance') or 0) < int(_cfg.get('min_balance') or 0):
-        _emit({{'thread_id':item['thread_id'],'status':'余额保留','price':price,'balance':pay.get('balance',0),'purchased':False,'reason':'购买后余额将低于最低保留余额','attempts':{{'thread':thread_attempts,'pay':pay_attempts}}}}); break
-    if not pay.get('form') or not pay.get('button'):
-        _emit({{'thread_id':item['thread_id'],'status':'购买失败','price':price,'purchased':False,'reason':'付款页重试3次仍未出现提交按钮','attempts':{{'thread':thread_attempts,'pay':pay_attempts}}}}); continue
-    if not _cfg['execute']:
-        _emit({{'thread_id':item['thread_id'],'status':'待购买','price':price,'balance':pay.get('balance',0),'purchased':False,'reason':'只读预览','attempts':{{'thread':thread_attempts,'pay':pay_attempts}}}}); continue
-    verified='未确认'; after={{'posts':0}}; verify_attempts=0; purchase_attempts=[]
+    known_price=int(item.get('price') or 0); known_status=item.get('purchase_status') or '未购买'; verified='未确认'; price=known_price; purchase_attempts=[]; state={{}}; after={{'posts':0}}
     for purchase_attempt in range(1,4):
-        if purchase_attempt > 1:
+        try:
+            state,thread_attempts=_load_thread(item['url'])
+            if not state.get('posts'):
+                purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'status':'主题页楼层未出现'}}); continue
+            if not state.get('buy'):
+                resolved='已购买' if known_price>0 or known_status in ('已购买','购买失败','余额不足','金币超限') else '免费'
+                if resolved=='免费':
+                    _emit({{'thread_id':item['thread_id'],'status':'免费','price':known_price,'reason':'主题页没有购买链接','attempts':{{'purchase':purchase_attempts,'thread':thread_attempts}},'title':state.get('title',''),'purchased':False}})
+                    verified=resolved; break
+                verified='已购买'; break
+            _log({{'event':'pay_start','thread_id':item['thread_id'],'attempt':purchase_attempt,'url':state['buy']['href']}})
             pay,pay_attempts=_load_pay(state['buy']['href']); price=int(pay.get('price') or price)
             if not pay.get('form') or not pay.get('button'):
-                purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':0,'status':'付款按钮未出现'}}); continue
-            if _cfg.get('auto_purchase') and int(pay.get('balance') or 0) < int(_cfg.get('min_balance') or 0):
-                verified='余额不足'; purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':0,'status':'余额不足'}}); break
-        button=pay.get('button')
-        click_at_xy(button['x'] + button['w']/2, button['y'] + button['h']/2)
-        _time.sleep(1.5)
-        try: wait_for_load(timeout=15)
-        except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
-        try: wait_for_network_idle(timeout=10,idle_ms=800)
-        except Exception as _exc: _log({{'event':'wait_for_network_idle_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
-        verified,after,verify_attempts=_verify_purchase(item['url'])
-        purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
-        if verified in ('已购买','余额不足'): break
-        _time.sleep(1.0)
+                purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'status':'付款按钮未出现'}}); continue
+            if price > int(_cfg['max_price']): verified='金币超限'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'status':verified}}); break
+            if _cfg.get('auto_purchase') and int(pay.get('balance') or 0) < int(_cfg.get('min_balance') or 0): verified='余额保留'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'status':verified}}); break
+            if not _cfg['execute']:
+                _emit({{'thread_id':item['thread_id'],'status':'待购买','price':price,'balance':pay.get('balance',0),'purchased':False,'reason':'只读预览','attempts':{{'purchase':purchase_attempts+[{{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts}}]}}}}); verified='待购买'; break
+            button=pay['button']; click_at_xy(button['x']+button['w']/2,button['y']+button['h']/2); _time.sleep(1.5)
+            try: wait_for_load(timeout=15)
+            except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
+            try: wait_for_network_idle(timeout=10,idle_ms=800)
+            except Exception as _exc: _log({{'event':'wait_for_network_idle_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
+            verified,after,verify_attempts=_verify_purchase(item['url']); purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
+            if verified in ('已购买','余额不足'): break
+        except Exception as _exc:
+            _log({{'event':'purchase_attempt_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}}); purchase_attempts.append({{'attempt':purchase_attempt,'status':'异常','error':repr(_exc)}})
     if verified=='余额不足':
         _emit({{'thread_id':item['thread_id'],'status':'余额不足','price':price,'purchased':False,'reason':'提交后页面提示余额不足','attempts':{{'thread':thread_attempts,'purchase':purchase_attempts}}}}); break
+    if verified=='余额保留':
+        _emit({{'thread_id':item['thread_id'],'status':'余额保留','price':price,'purchased':False,'reason':'购买后余额将低于最低保留余额','attempts':{{'purchase':purchase_attempts}}}}); break
+    if verified in ('金币超限','免费','待购买'): continue
     if verified!='已购买':
         _emit({{'thread_id':item['thread_id'],'status':'购买失败','price':price,'purchased':False,'reason':'付款按钮点击后仍未确认购买，已重试3次','attempts':{{'thread':thread_attempts,'purchase':purchase_attempts}}}}); continue
     _bought += 1

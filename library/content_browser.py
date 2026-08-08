@@ -23,7 +23,8 @@ def _log(x):
         with open(_log_path,'a',encoding='utf-8') as _fh: _fh.write(_json.dumps(x,ensure_ascii=False)+'\\n'); _fh.flush()
     except Exception: pass
 def _emit(x):
-    _log({{'event':'browser_result', **x}})
+    _summary={{k:v for k,v in x.items() if k not in ('posts','post_html','raw_html')}}; _summary['post_count']=len(x.get('posts') or [])
+    _log({{'event':'browser_result', **_summary}})
     print(_marker+_json.dumps(x,ensure_ascii=False),flush=True)
 def _goto(url):
     global _started
@@ -61,14 +62,13 @@ def _load_thread(url, attempts=3, settle=False):
                 if settle: _time.sleep(2)
                 return state,attempt
     return state,attempts
-def _load_pay(url, attempts=3):
+def _load_pay(url, attempts=1):
     pay={{'form':False,'button':None,'price':0,'balance':0,'body':''}}
-    for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#payform',timeout=8); wait_for_element('#payform button[name="paysubmit"]',timeout=6,visible=True)
-        pay=_pay()
-        if pay.get('form') and pay.get('button'): return pay,attempt
-        _time.sleep(attempt)
-    return pay,attempts
+    try: _goto(url)
+    except Exception as _exc: _log({{'event':'pay_navigation_error','url':str(url),'attempt':1,'error':repr(_exc)}}); return pay,1
+    try: wait_for_element('#payform',timeout=8); wait_for_element('#payform button[name="paysubmit"]',timeout=6,visible=True)
+    except Exception as _exc: _log({{'event':'pay_form_wait_error','url':str(url),'attempt':1,'error':repr(_exc)}}); return pay,1
+    return _pay(),1
 def _verify_purchase(url, attempts=4):
     state={{'rows':[],'buy':'','body':'','ready':False}}
     for attempt in range(1,attempts+1):
@@ -88,27 +88,28 @@ for item in _cfg['candidates']:
     if state['buy']:
         if not _cfg['execute']:
             _emit({{'thread_id':item['thread_id'],'status':'待购买','title':state['title'],'attempts':thread_attempts,'posts':[]}}); continue
-        pay,pay_attempts=_load_pay(state['buy']); attempt_log['pay']=pay_attempts; detected_price=int(pay.get('price') or detected_price or 0)
-        if not pay.get('form') or not pay.get('button'):
-            _emit({{'thread_id':item['thread_id'],'status':'购买失败','reason':'付款页重试3次仍未出现提交按钮','attempts':{{'thread':thread_attempts,'pay':pay_attempts}},'price':detected_price,'purchase_status':'购买失败','posts':[]}}); continue
-        if detected_price>int(_cfg['max_price']):
-            _emit({{'thread_id':item['thread_id'],'status':'金币超限','reason':'单篇价格超过设置上限','attempts':{{'thread':thread_attempts,'pay':pay_attempts}},'price':detected_price,'purchase_status':'金币超限','posts':[]}}); continue
-        if int(pay.get('balance') or 0)<int(_cfg['min_balance']):
-            _emit({{'thread_id':item['thread_id'],'status':'余额不足','reason':'购买后余额将低于最低保留余额','attempts':{{'thread':thread_attempts,'pay':pay_attempts}},'price':detected_price,'balance':pay.get('balance',0),'purchase_status':'余额不足','posts':[]}}); break
-        verified='未确认'; verify_attempts=0; purchase_attempts=[]
+        verified='未确认'; after={{'posts':0}}; purchase_attempts=[]
         for purchase_attempt in range(1,4):
             if purchase_attempt > 1:
-                pay,pay_attempts=_load_pay(state['buy']); detected_price=int(pay.get('price') or detected_price)
-                if not pay.get('form') or not pay.get('button'):
-                    purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':0,'status':'付款按钮未出现'}}); continue
-                if int(pay.get('balance') or 0)<int(_cfg['min_balance']):
-                    verified='余额不足'; purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':0,'status':'余额不足'}}); break
+                state,thread_attempts=_load_thread(item['url'], settle=True)
+                if not state.get('rows'):
+                    purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'verify':0,'status':'主题页楼层未出现'}}); continue
+            if not state.get('buy'):
+                verified='已购买'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'verify':0,'status':'购买链接已消失'}}); break
+            _log({{'event':'pay_start','thread_id':item['thread_id'],'attempt':purchase_attempt,'url':state['buy']}})
+            pay,pay_attempts=_load_pay(state['buy']); detected_price=int(pay.get('price') or detected_price or 0)
+            if not pay.get('form') or not pay.get('button'):
+                purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':0,'status':'付款按钮未出现'}}); continue
+            if detected_price>int(_cfg['max_price']):
+                verified='金币超限'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':0,'status':'金币超限'}}); break
+            if int(pay.get('balance') or 0)<int(_cfg['min_balance']):
+                verified='余额不足'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':0,'status':'余额不足'}}); break
             button=pay['button']; click_at_xy(button['x']+button['w']/2,pay['button']['y']+pay['button']['h']/2); _time.sleep(1.5)
             try: wait_for_load(timeout=15)
             except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
             try: wait_for_network_idle(timeout=10,idle_ms=800)
             except Exception as _exc: _log({{'event':'wait_for_network_idle_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
-            verified,state,verify_attempts=_verify_purchase(item['url']); purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
+            verified,after,verify_attempts=_verify_purchase(item['url']); purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
             if verified in ('已购买','余额不足'): break
             _time.sleep(1.0)
         attempt_log['purchase']=purchase_attempts
