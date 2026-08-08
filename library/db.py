@@ -223,9 +223,23 @@ class LibraryDB:
 
     def upsert_post(self, post: Mapping[str, Any]) -> None:
         values = (str(post.get("thread_id") or ""), str(post.get("remote_post_id") or ""), int(post.get("floor_number") or 0), int(post.get("page_number") or 0), str(post.get("author_id") or ""), str(post.get("posted_at") or ""), str(post.get("edited_at") or ""), str(post.get("post_type") or "正文"), str(post.get("raw_html") or ""), str(post.get("clean_text") or ""), str(post.get("content_hash") or ""))
+        self._upsert_post_values(values)
+        self.connection.commit()
+
+    def _upsert_post_values(self, values: tuple[Any, ...]) -> None:
         self.connection.execute("""INSERT INTO posts(thread_id,remote_post_id,floor_number,page_number,author_id,posted_at,edited_at,post_type,raw_html,clean_text,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(remote_post_id) DO UPDATE SET thread_id=excluded.thread_id,floor_number=excluded.floor_number,page_number=excluded.page_number,author_id=excluded.author_id,posted_at=excluded.posted_at,edited_at=excluded.edited_at,post_type=excluded.post_type,raw_html=excluded.raw_html,clean_text=excluded.clean_text,content_hash=excluded.content_hash""", values)
-        self.connection.commit()
+
+    def replace_posts(self, thread_id: str, posts: Iterable[Mapping[str, Any]]) -> None:
+        """在一次事务中替换某帖正文记录；新抓取失败时不会调用此方法。"""
+        values_list = [
+            (str(post.get("thread_id") or thread_id), str(post.get("remote_post_id") or ""), int(post.get("floor_number") or 0), int(post.get("page_number") or 0), str(post.get("author_id") or ""), str(post.get("posted_at") or ""), str(post.get("edited_at") or ""), str(post.get("post_type") or "正文"), str(post.get("raw_html") or ""), str(post.get("clean_text") or ""), str(post.get("content_hash") or ""))
+            for post in posts
+        ]
+        with self.connection:
+            self.connection.execute("DELETE FROM posts WHERE thread_id=?", (thread_id,))
+            for values in values_list:
+                self._upsert_post_values(values)
 
     def list_posts(self, thread_id: str) -> list[dict[str, Any]]:
         return [dict(row) for row in self.connection.execute("SELECT * FROM posts WHERE thread_id=? ORDER BY floor_number,id", (thread_id,)).fetchall()]

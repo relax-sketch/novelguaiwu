@@ -40,6 +40,9 @@ class LibraryDBTests(unittest.TestCase):
             db.update_download_result("1002", status="购买失败", purchase_status="购买失败")
             failed = next(row for row in db.list_works() if row["thread_id"] == "1002")
             self.assertEqual(failed["download_status"], "下载失败")
+            db.upsert_post({"thread_id":"1002","remote_post_id":"old","floor_number":1,"raw_html":"旧"})
+            db.replace_posts("1002", [{"thread_id":"1002","remote_post_id":"new","floor_number":1,"raw_html":"新"}])
+            self.assertEqual([p["remote_post_id"] for p in db.list_posts("1002")], ["new"])
             self.assertEqual(failed["purchase_status"], "购买失败")
 
     def test_run_config_and_page_tag_controls(self) -> None:
@@ -73,13 +76,17 @@ class LibraryDBTests(unittest.TestCase):
             self.assertIn("download_min_balance", PAGE)
             self.assertIn("download_max_pages", PAGE)
             self.assertIn("单帖最多页数", PAGE)
-            self.assertIn("按已下载保存", PAGE)
+            self.assertIn("单帖最多抓取", PAGE)
             self.assertIn("library.max_pages_per_work", PAGE)
             self.assertIn("downloadPosts('auto')", PAGE)
             self.assertIn("/api/authors", PAGE)
             self.assertIn("全部作者", PAGE)
             self.assertIn("execute=true", PAGE)
             self.assertIn("run-detail", PAGE)
+            self.assertIn("重新抓取勾选正文", PAGE)
+            self.assertIn('downloadPosts(\'redownload\')', PAGE)
+            self.assertIn('onclick="pickRange(event,${i})"', PAGE)
+            self.assertIn('按住 Shift 可连续选择', PAGE)
 
     def test_purchase_program_is_dry_run_by_default(self) -> None:
         script = browser_program([PurchaseCandidate("802", "https://example.test/thread/802")], max_price=3, execute=False, count=2)
@@ -93,7 +100,10 @@ class LibraryDBTests(unittest.TestCase):
         self.assertIn('"auto_purchase": true', auto_script)
         self.assertIn('"min_balance": 20', auto_script)
         self.assertIn("余额保留", auto_script)
-        self.assertIn("wait_for_element('#payform'", script)
+        self.assertIn("for poll in range(1,4)", script)
+        self.assertIn("for delay in (0.75,1.5,2.25)", script)
+        self.assertIn("_time.sleep(2)", script)
+        self.assertNotIn("range(1,5)", script)
         self.assertIn("_verify_purchase", script)
         self.assertIn("已重试3次", script)
         self.assertNotIn("capture_screenshot()", script)
@@ -112,6 +122,10 @@ class LibraryDBTests(unittest.TestCase):
         self.assertIn("wait_for_element('#payform'", content_script)
         self.assertIn("_verify_purchase", content_script)
         self.assertIn("已重试3次", content_script)
+        self.assertIn("for delay in (0.75,1.5,2.25)", content_script)
+        self.assertIn("_load_thread(item['url'], settle=True)", content_script)
+        self.assertIn("settle=False", content_script)
+        self.assertIn("_time.sleep(2); state=_state()", content_script)
         self.assertNotIn("capture_screenshot()", content_script)
 
     def test_automation_browser_is_isolated_and_visible_without_images(self) -> None:
@@ -136,6 +150,7 @@ class LibraryDBTests(unittest.TestCase):
             self.assertIn("正文", txt.read_text(encoding="utf-8")); self.assertTrue(zip_path.exists())
         rows = [{"thread_id":"1","download_status":"未下载","tags":["改造变化"]},{"thread_id":"2","download_status":"未下载","tags":["版务"]},{"thread_id":"3","download_status":"有更新","local_path":"data/done","tags":[]}]
         self.assertEqual([x["thread_id"] for x in build_download_queue(rows)], ["1"])
+        self.assertEqual([x["thread_id"] for x in build_download_queue(rows, force=True)], ["1", "2", "3"])
         preview = plan_download(rows, DownloadSettings(count=1))
         self.assertEqual(preview[0]["thread_id"], "1")
         self.assertEqual(preview[0]["status"], "待下载")

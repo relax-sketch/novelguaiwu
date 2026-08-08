@@ -33,12 +33,16 @@ def _emit(value): print(_marker + _json.dumps(value, ensure_ascii=False), flush=
 def _goto(url):
     new_tab(url) if not globals().get('_started') else goto_url(url)
     globals()['_started'] = True
-    wait_for_load(timeout=20); _time.sleep(0.5)
+    try: wait_for_load(timeout=20)
+    except Exception: pass
+    _time.sleep(0.5)
 def _thread_state():
     return _json.loads(js(r"""JSON.stringify((()=>{{
       const text=document.body?.innerText||''; const buy=document.querySelector('a.viewpay');
       const posts=Array.from(document.querySelectorAll('div[id^=\\\"post_\\\"]')).filter(x=>/^post_\\d+$/.test(x.id));
-      return {{title:(document.querySelector('#thread_subject')?.innerText||document.title||'').trim(),buy:buy?{{href:buy.href,text:(buy.innerText||'').trim()}}:null,posts:posts.length,hasBalance:/积分[:\\s]+\\d+/.test(text)}};
+      const bodies=posts.filter(x=>x.querySelector('[id^=\\"postmessage_\\"], .t_f'));
+      const title=(document.querySelector('#thread_subject')?.innerText||'').trim();
+      return {{title:title,buy:buy?{{href:buy.href,text:(buy.innerText||'').trim()}}:null,posts:posts.length,body_nodes:bodies.length,ready:!!(title&&posts.length&&(bodies.length||buy)),hasBalance:/积分[:\\s]+\\d+/.test(text)}};
     }})())"""))
 def _pay_state():
     return _json.loads(js(r"""JSON.stringify((()=>{{
@@ -49,29 +53,33 @@ def _pay_state():
       return {{form:!!form,rows:rows,price:parseInt((price.match(/\\d+/)||['0'])[0],10),balance:parseInt((balance.match(/\\d+/)||['0'])[0],10),button:r?{{x:r.x,y:r.y,w:r.width,h:r.height}}:null}};
     }})())"""))
 def _load_thread(url, attempts=3):
-    state={{'buy':None,'posts':0}}
+    state={{'buy':None,'posts':0,'body_nodes':0,'ready':False}}
     for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#thread_subject',timeout=8); wait_for_element('div[id^="post_"]',timeout=8)
-        state=_thread_state()
-        if state.get('posts'): return state,attempt
-        _time.sleep(attempt)
+        _goto(url)
+        for delay in (0.75,1.5,2.25):
+            _time.sleep(delay)
+            state=_thread_state()
+            if state.get('ready'):
+                _time.sleep(2)
+                return state,attempt
     return state,attempts
 def _load_pay(url, attempts=3):
     pay={{'form':False,'button':None,'price':0,'balance':0}}
     for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#payform',timeout=8); wait_for_element('#payform button[name="paysubmit"]',timeout=6,visible=True)
-        pay=_pay_state()
-        if pay.get('form') and pay.get('button'): return pay,attempt
-        _time.sleep(attempt)
+        _goto(url)
+        for poll in range(1,4):
+            pay=_pay_state()
+            if pay.get('form') and pay.get('button'): return pay,attempt
+            _time.sleep(0.75 * poll)
     return pay,attempts
 def _verify_purchase(url, attempts=4):
-    state={{'buy':None,'posts':0}}
+    state={{'buy':None,'posts':0,'body_nodes':0,'ready':False}}
     for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#thread_subject',timeout=8); wait_for_element('div[id^="post_"]',timeout=8)
         state=_thread_state(); body=(js('document.body?.innerText||""') or '')
         if '余额不足' in body: return '余额不足',state,attempt
-        if state.get('posts') and not state.get('buy'): return '已购买',state,attempt
-        _time.sleep(attempt*1.5)
+        if state.get('ready') and not state.get('buy'): return '已购买',state,attempt
+        if attempt == 1 and not state.get('posts'): _goto(url)
+        _time.sleep(0.75 * attempt)
     return '未确认',state,attempts
 _started=False
 _bought=0

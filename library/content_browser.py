@@ -20,13 +20,17 @@ def _goto(url):
     global _started
     if _started: goto_url(url)
     else: new_tab(url); _started=True
-    wait_for_load(timeout=20); _time.sleep(0.5)
+    try: wait_for_load(timeout=20)
+    except Exception: pass
+    _time.sleep(0.5)
 def _state():
     return _json.loads(js(r"""JSON.stringify((()=>{{
       const rows=Array.from(document.querySelectorAll('div[id^="post_"]')).filter(x=>/^post_\d+$/.test(x.id));
       const first=rows[0]; const author=first?.querySelector('.authi a.xw1'); const buy=document.querySelector('a.viewpay');
       const pageNums=Array.from(document.querySelectorAll('a[href*="page="]')).map(a=>Number((a.href.match(/[?&]page=(\d+)/)||[])[1]||0)).filter(Boolean);
-      return {{title:(document.querySelector('#thread_subject')?.innerText||document.title||'').trim(),author_name:(author?.innerText||'').trim(),author_id:(author?.href?.match(/[?&]uid=(\d+)/)||[])[1]||'',buy:buy?.href||'',page_count:Math.max(1,...pageNums),body:(document.body?.innerText||'').slice(0,4000),rows:rows.map(x=>{{const a=x.querySelector('.authi a.xw1');const m=x.querySelector('[id^="postmessage_"]')||x.querySelector('.t_f');const clone=m?.cloneNode(true);clone?.querySelectorAll('img').forEach(i=>i.remove());return {{remote_post_id:(x.id.match(/(\d+)$/)||[])[1]||'',author_name:(a?.innerText||'').trim(),author_id:(a?.href?.match(/[?&]uid=(\d+)/)||[])[1]||'',raw_html:clone?.innerHTML||'',post_html:x.outerHTML}};}})}};
+      const title=(document.querySelector('#thread_subject')?.innerText||'').trim();
+      const bodyNodes=rows.filter(x=>x.querySelector('[id^="postmessage_"], .t_f'));
+      return {{title:title,author_name:(author?.innerText||'').trim(),author_id:(author?.href?.match(/[?&]uid=(\d+)/)||[])[1]||'',buy:buy?.href||'',page_count:Math.max(1,...pageNums),body:(document.body?.innerText||'').slice(0,4000),body_nodes:bodyNodes.length,ready:!!(title&&rows.length&&(bodyNodes.length||buy)),rows:rows.map(x=>{{const a=x.querySelector('.authi a.xw1');const m=x.querySelector('[id^="postmessage_"]')||x.querySelector('.t_f');const clone=m?.cloneNode(true);clone?.querySelectorAll('img').forEach(i=>i.remove());return {{remote_post_id:(x.id.match(/(\d+)$/)||[])[1]||'',author_name:(a?.innerText||'').trim(),author_id:(a?.href?.match(/[?&]uid=(\d+)/)||[])[1]||'',raw_html:clone?.innerHTML||'',post_html:x.outerHTML}};}})}};
     }})())"""))
 def _pay():
     return _json.loads(js(r"""JSON.stringify((()=>{{
@@ -37,13 +41,16 @@ def _pay():
       const balance=(rows.find(x=>x.k.includes('购买后余额'))?.v||'').match(/-?\d+/)?.[0]||0;
       return {{form:!!form,price:Number(price),balance:Number(balance),button:r?{{x:r.x,y:r.y,w:r.width,h:r.height}}:null,body:(document.body?.innerText||'').slice(0,2000)}};
     }})())"""))
-def _load_thread(url, attempts=3):
-    state={{'rows':[],'buy':'','body':''}}
+def _load_thread(url, attempts=3, settle=False):
+    state={{'rows':[],'buy':'','body':'','ready':False}}
     for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#thread_subject',timeout=8); wait_for_element('div[id^="post_"]',timeout=8)
-        state=_state()
-        if state.get('rows'): return state,attempt
-        _time.sleep(attempt)
+        _goto(url)
+        for delay in (0.75,1.5,2.25):
+            _time.sleep(delay)
+            state=_state()
+            if state.get('ready'):
+                if settle: _time.sleep(2)
+                return state,attempt
     return state,attempts
 def _load_pay(url, attempts=3):
     pay={{'form':False,'button':None,'price':0,'balance':0,'body':''}}
@@ -54,17 +61,17 @@ def _load_pay(url, attempts=3):
         _time.sleep(attempt)
     return pay,attempts
 def _verify_purchase(url, attempts=4):
-    state={{'rows':[],'buy':'','body':''}}
+    state={{'rows':[],'buy':'','body':'','ready':False}}
     for attempt in range(1,attempts+1):
-        _goto(url); wait_for_element('#thread_subject',timeout=8); wait_for_element('div[id^="post_"]',timeout=8)
         state=_state(); body=state.get('body') or ''
         if '余额不足' in body: return '余额不足',state,attempt
-        if state.get('rows') and not state.get('buy'): return '已购买',state,attempt
-        _time.sleep(attempt*1.5)
+        if state.get('ready') and not state.get('buy'): return '已购买',state,attempt
+        if attempt == 1 and not state.get('rows'): _goto(url)
+        _time.sleep(0.75 * attempt)
     return '未确认',state,attempts
 for item in _cfg['candidates']:
     if _downloaded>=int(_cfg['download_limit']): break
-    state,thread_attempts=_load_thread(item['url'])
+    state,thread_attempts=_load_thread(item['url'], settle=True)
     if not state['rows']:
         _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页重试3次仍未找到帖子楼层','attempts':thread_attempts,'posts':[]}}); continue
     purchase_status=item.get('purchase_status') or '未购买'; detected_price=int(item.get('price') or 0); attempt_log={{'thread':thread_attempts}}
@@ -96,6 +103,7 @@ for item in _cfg['candidates']:
             _emit({{'thread_id':item['thread_id'],'status':'余额不足','reason':'提交后页面提示余额不足','attempts':attempt_log,'price':detected_price,'purchase_status':'余额不足','posts':[]}}); break
         if verified!='已购买':
             _emit({{'thread_id':item['thread_id'],'status':'购买失败','reason':'付款按钮点击后仍未确认购买，已重试3次','attempts':attempt_log,'price':detected_price,'purchase_status':'购买失败','posts':[]}}); continue
+        _time.sleep(2); state=_state()
         purchase_status='已购买'
     elif purchase_status not in ('已购买','免费'):
         purchase_status='已购买' if detected_price>0 or purchase_status in ('购买失败','余额不足','金币超限') else '免费'
@@ -104,7 +112,7 @@ for item in _cfg['candidates']:
     all_rows=[dict(p,page_number=1) for p in state['rows'] if str(p.get('remote_post_id') or '') not in known]
     failed_reason=''; start_page=max(2,resume_page+1 if existing else 2)
     for page in range(start_page,effective_page_count+1):
-        sep='&' if '?' in item['url'] else '?'; page_state,page_attempts=_load_thread(item['url']+sep+'page='+str(page))
+        sep='&' if '?' in item['url'] else '?'; page_state,page_attempts=_load_thread(item['url']+sep+'page='+str(page), settle=False)
         if not page_state['rows']:
             failed_reason=f'第{{page}}页重试3次仍无楼层'; break
         all_rows.extend(dict(p,page_number=page) for p in page_state['rows'] if str(p.get('remote_post_id') or '') not in known)
