@@ -1,0 +1,13 @@
+[project]
+name = "guaiwu-paiqu-library"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "browser-harness",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.uv.sources]
+browser-harness = { git = "https://github.com/browser-use/browser-harness.git", rev = "9c95cea713ae4890df7518f0cff27f41427fbf5b" }
