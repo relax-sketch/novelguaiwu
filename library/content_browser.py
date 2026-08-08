@@ -107,7 +107,10 @@ for item in _cfg['candidates']:
                 verified='金币超限'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':0,'status':'金币超限'}}); break
             if int(pay.get('balance') or 0)<int(_cfg['min_balance']):
                 verified='余额不足'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'verify':0,'status':'余额不足'}}); break
-            button=pay['button']; click_at_xy(button['x']+button['w']/2,pay['button']['y']+pay['button']['h']/2); _time.sleep(1.5)
+            # 使用 DOM click 触发付款表单。坐标点击在当前 CDP 页面上可能
+            # 看似执行但不会提交，导致后续误判为“购买未确认”。
+            js("document.querySelector('#payform button[name=\\\"paysubmit\\\"]').click()")
+            _time.sleep(1.5)
             try: wait_for_load(timeout=15)
             except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
             try: wait_for_network_idle(timeout=10,idle_ms=800)

@@ -117,7 +117,11 @@ for item in _cfg['candidates']:
             if _cfg.get('auto_purchase') and int(pay.get('balance') or 0) < int(_cfg.get('min_balance') or 0): verified='余额保留'; purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts,'status':verified}}); break
             if not _cfg['execute']:
                 _emit({{'thread_id':item['thread_id'],'status':'待购买','price':price,'balance':pay.get('balance',0),'purchased':False,'reason':'只读预览','attempts':{{'purchase':purchase_attempts+[{{'attempt':purchase_attempt,'thread':thread_attempts,'pay':pay_attempts}}]}}}}); verified='待购买'; break
-            button=pay['button']; click_at_xy(button['x']+button['w']/2,button['y']+button['h']/2); _time.sleep(1.5)
+            # 坐标点击在付款页可能只移动鼠标而不触发表单提交（尤其是
+            # CDP 页面缩放/滚动状态不一致时）。直接调用真实按钮的 DOM
+            # click 才能稳定触发原生 submit；按钮不存在时由上面的校验拦截。
+            js("document.querySelector('#payform button[name=\\\"paysubmit\\\"]').click()")
+            _time.sleep(1.5)
             try: wait_for_load(timeout=15)
             except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
             try: wait_for_network_idle(timeout=10,idle_ms=800)
