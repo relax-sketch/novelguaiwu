@@ -23,6 +23,24 @@ from urllib.request import urlopen
 
 from .automation_log import LOG_PATH, append_log
 
+_ACTIVE_HARNESS_PROCESS: subprocess.Popen[Any] | None = None
+_ACTIVE_HARNESS_LOCK = threading.Lock()
+
+
+def request_stop() -> bool:
+    """请求停止当前 Browser Harness 子进程；只影响本项目当前任务。"""
+    with _ACTIVE_HARNESS_LOCK:
+        proc = _ACTIVE_HARNESS_PROCESS
+    if proc is None or proc.poll() is not None:
+        return False
+    try:
+        proc.kill()
+        append_log("harness_stop_requested", pid=proc.pid)
+        return True
+    except OSError as exc:
+        append_log("harness_stop_error", pid=proc.pid, error=repr(exc))
+        return False
+
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
@@ -128,6 +146,9 @@ def ensure_browser(config: BrowserConfig | None = None) -> BrowserConfig:
 
 def _run_harness_stream_once(command: list[str], program: str, *, timeout: int, env: dict[str, str], on_stdout_line: Any | None) -> subprocess.CompletedProcess[str]:
     proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], env=env)
+    global _ACTIVE_HARNESS_PROCESS
+    with _ACTIVE_HARNESS_LOCK:
+        _ACTIVE_HARNESS_PROCESS = proc
     assert proc.stdin and proc.stdout and proc.stderr
     proc.stdin.write(program); proc.stdin.close()
     events: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -149,6 +170,9 @@ def _run_harness_stream_once(command: list[str], program: str, *, timeout: int, 
             if on_stdout_line: on_stdout_line(line.rstrip("\r\n"))
         else: stderr_lines.append(line)
     proc.wait(timeout=10)
+    with _ACTIVE_HARNESS_LOCK:
+        if _ACTIVE_HARNESS_PROCESS is proc:
+            _ACTIVE_HARNESS_PROCESS = None
     return subprocess.CompletedProcess(command, proc.returncode, "".join(stdout_lines), "".join(stderr_lines))
 
 

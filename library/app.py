@@ -14,6 +14,7 @@ from .db import LibraryDB, WorkFilter
 from .downloader import DownloadSettings, run_download
 from .exporter import export_txt, export_zip
 from .automation_log import append_log
+from .automation_browser import request_stop
 from .purchase import SKIP_PURCHASE_TAGS, PurchaseCandidate, run_purchase
 from .scanner import ScanSettings, load_fixture, normalize_works, scan_with_browser
 
@@ -102,6 +103,9 @@ PAGE = PAGE.replace('await loadWorks();}catch(e){message.textContent="下载失�
 PAGE = PAGE.replace('购买可在下方“购买设置”中预览或启动。', '选择查看数或回复数排序后，可按批次自动购买、抓取和保存。')
 PAGE = PAGE.replace('查看最新排序', '查看数降序')
 PAGE = PAGE.replace('</body>', '<script>(()=>{const input=$("download_max_pages"),key="library.max_pages_per_work";const saved=Number(localStorage.getItem(key));if(input&&saved>=1&&saved<=100)input.value=String(saved);input?.addEventListener("change",()=>localStorage.setItem(key,String(Math.max(1,Math.min(100,Number(input.value)||6)))));})();</script></body>')
+PAGE = PAGE.replace('</header>', '<div class="actions service-actions"><button class="button" type="button" onclick="stopTask()">停止当前任务</button><button class="button danger" type="button" onclick="shutdownService()">关闭服务</button></div></header>')
+PAGE = PAGE.replace('</body>', '<script>async function stopTask(){const m=$("actionMessage")||$("scanMessage");if(!confirm("确认停止当前购买/下载任务？"))return;try{const r=await fetch("/api/stop-task",{method:"POST"}),d=await r.json();if(m)m.textContent=d.stopped?"已请求停止当前任务":"当前没有正在运行的任务";}catch(e){if(m)m.textContent="停止任务失败："+e.message;}}async function shutdownService(){if(!confirm("确认关闭管理服务？关闭后页面将无法继续操作。"))return;try{const r=await fetch("/api/shutdown",{method:"POST"}),d=await r.json();document.body.innerHTML="<main><section class=\\"card\\"><h2>服务已关闭</h2><p>管理服务已停止，可以关闭此页面。</p></section></main>";}catch(e){document.body.innerHTML="<main><section class=\\"card\\"><h2>服务已关闭</h2><p>管理服务已停止或连接已断开。</p></section></main>";}}</script></body>')
+PAGE = PAGE.replace('</style>', '.service-actions{margin-top:0}.button.danger{color:#9a403d;border-color:#c98e8a}.button.danger:hover{background:#fff0ef}</style>')
 # 用户要求隐藏独立购买面板但不要删除；可见流程统一从“下载”启动自动购买。
 PAGE = PAGE.replace('<section class="card purchase-card">', '<section class="card purchase-card" hidden>')
 
@@ -192,6 +196,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/api/stop-task":
+            stopped = request_stop()
+            self._send(json.dumps({"stopped": stopped}, ensure_ascii=False), content_type="application/json; charset=utf-8")
+            return
+        if path == "/api/shutdown":
+            self._send(json.dumps({"stopping": True}, ensure_ascii=False), content_type="application/json; charset=utf-8")
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if path == "/api/download":
             run_id: int | None = None
             try:
