@@ -97,14 +97,15 @@ _started=False
 _bought=0
 for item in _cfg['candidates']:
     if _bought >= int(_cfg['count']): break
-    known_price=int(item.get('price') or 0); known_status=item.get('purchase_status') or '未购买'; verified='未确认'; price=known_price; purchase_attempts=[]; state={{}}; after={{'posts':0}}
+    # purchase_status 只是数据库缓存；主题页当前 DOM 才是实时状态。
+    known_price=int(item.get('price') or 0); verified='未确认'; price=known_price; purchase_attempts=[]; state={{}}; after={{'posts':0}}
     for purchase_attempt in range(1,4):
         try:
             state,thread_attempts=_load_thread(item['url'])
             if not state.get('posts'):
                 purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'status':'主题页楼层未出现'}}); continue
             if not state.get('buy'):
-                resolved='已购买' if known_status=='已购买' else ('免费' if known_price==0 and known_status=='未购买' else '购买状态未确认')
+                resolved='已购买' if state.get('body_nodes', 0) and price > 0 else ('免费' if state.get('body_nodes', 0) else '购买状态未确认')
                 if resolved=='免费':
                     _emit({{'thread_id':item['thread_id'],'status':'免费','price':known_price,'reason':'主题页没有购买链接','attempts':{{'purchase':purchase_attempts,'thread':thread_attempts}},'title':state.get('title',''),'purchased':False}})
                     verified=resolved; break

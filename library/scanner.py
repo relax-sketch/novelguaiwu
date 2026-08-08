@@ -48,7 +48,10 @@ def _rows():
       const author = authorCells[0]?.querySelector('a[href*=\\\"mod=space\\\"]');
       const last = authorCells[1]?.querySelector('span');
       const pages = Array.from(row.querySelectorAll('a[href*=\\\"page=\\\"]')).map(x => Number((x.href.match(/[?&]page=(\\d+)/)||[])[1]||0)).filter(Boolean);
-      return {{thread_id:tid,url:href,title:(a?.innerText||'').trim(),author_name:(author?.innerText||'').trim(),author_id:(author?.href?.match(/[?&]uid=(\\d+)/)||[])[1]||'',tags:Array.from(row.querySelectorAll('a[href*=\\\"filter=typeid\\\"]')).map(x=>(x.innerText||'').trim()).filter(Boolean),views:Number(row.dataset.views||num?.querySelector('em')?.innerText||0),replies:Number(row.dataset.replies||num?.querySelector('a')?.innerText||0),page_count:Math.max(1,...pages),publish_time:(authorCells[0]?.querySelector('span')?.innerText||authorCells[0]?.querySelector('em')?.innerText||'').trim(),last_reply_time:(last?.getAttribute('title')||last?.innerText||'').trim()}};
+      const text = row.innerText || '';
+      const priceMatch = text.match(/售价\\s*(\\d+)\\s*金钱/);
+      const price = priceMatch ? Number(priceMatch[1]) : 0;
+      return {{thread_id:tid,url:href,title:(a?.innerText||'').trim(),author_name:(author?.innerText||'').trim(),author_id:(author?.href?.match(/[?&]uid=(\\d+)/)||[])[1]||'',tags:Array.from(row.querySelectorAll('a[href*=\\\"filter=typeid\\\"]')).map(x=>(x.innerText||'').trim()).filter(Boolean),views:Number(row.dataset.views||num?.querySelector('em')?.innerText||0),replies:Number(row.dataset.replies||num?.querySelector('a')?.innerText||0),page_count:Math.max(1,...pages),price:price,publish_time:(authorCells[0]?.querySelector('span')?.innerText||authorCells[0]?.querySelector('em')?.innerText||'').trim(),last_reply_time:(last?.getAttribute('title')||last?.innerText||'').trim()}};
     }}).filter(x => x.thread_id && x.url))""")
     return _json.loads(raw)
 _started = False

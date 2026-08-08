@@ -90,7 +90,8 @@ for item in _cfg['candidates']:
     state,thread_attempts=_load_thread(item['url'], settle=True)
     if not state['rows']:
         _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页重试3次仍未找到帖子楼层','attempts':thread_attempts,'posts':[]}}); continue
-    purchase_status=item.get('purchase_status') or '未购买'; detected_price=int(item.get('price') or 0); attempt_log={{'thread':thread_attempts}}
+    # purchase_status 只是数据库缓存；主题页当前 DOM 才是实时状态。
+    purchase_status='未购买'; detected_price=int(item.get('price') or 0); attempt_log={{'thread':thread_attempts}}
     if state['buy']:
         if not _cfg['execute']:
             _emit({{'thread_id':item['thread_id'],'status':'待购买','title':state['title'],'attempts':thread_attempts,'posts':[]}}); continue
@@ -128,10 +129,12 @@ for item in _cfg['candidates']:
             _emit({{'thread_id':item['thread_id'],'status':'购买失败','reason':'付款按钮点击后仍未确认购买，已重试3次','attempts':attempt_log,'price':detected_price,'purchase_status':'购买失败','posts':[]}}); continue
         _time.sleep(2); state=_state()
         purchase_status='已购买'
-    elif purchase_status not in ('已购买','免费'):
-        if detected_price > 0 or purchase_status in ('购买失败','余额不足','金币超限'):
-            _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页未确认购买链接，拒绝将收费帖标记为已完成','attempts':{{'thread':thread_attempts}},'price':detected_price,'purchase_status':'购买状态未确认','posts':[]}}); continue
-        purchase_status='免费'
+    elif state.get('body_nodes', 0) > 0:
+        # 无购买入口且正文可见：当前账号已经解锁；是否付费由列表页 price 决定。
+        purchase_status='已购买' if detected_price > 0 else '免费'
+    else:
+        # 既没有购买入口，也没有正文，才无法判断当前页面状态。
+        _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页既无购买入口也无正文','attempts':{{'thread':thread_attempts}},'price':detected_price,'purchase_status':'购买状态未确认','posts':[]}}); continue
     author_id=state['author_id']; existing=item.get('existing_posts') or []; known={{str(p.get('remote_post_id') or '') for p in existing}}
     resume_page=max([int(p.get('page_number') or 1) for p in existing] or [1]); page_limit=max(1,int(_cfg['max_pages_per_work'])); effective_page_count=min(int(state['page_count']),page_limit)
     all_rows=[dict(p,page_number=1) for p in state['rows'] if str(p.get('remote_post_id') or '') not in known]

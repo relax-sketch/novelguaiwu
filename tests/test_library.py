@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from library.db import LibraryDB, WorkFilter
-from library.scanner import ScanSettings, load_fixture, normalize_works
+from library.scanner import ScanSettings, browser_program as scanner_browser_program, load_fixture, normalize_works
 from library.app import FORUM_TAG_PRESETS, PAGE
 from library.purchase import SKIP_PURCHASE_TAGS, PurchaseCandidate, browser_program
 from library.cleaner import clean_posts, clean_text
@@ -119,7 +119,13 @@ class LibraryDBTests(unittest.TestCase):
         self.assertIn("p['author_id']==author_id", content_script)
         self.assertIn("余额不足", content_script)
         self.assertIn("页面异常", content_script)
-        self.assertIn("purchase_status='免费'", content_script)
+        self.assertIn("# purchase_status 只是数据库缓存；主题页当前 DOM 才是实时状态。", content_script)
+        self.assertIn("if state['buy']:", content_script)
+        self.assertIn("elif state.get('body_nodes', 0) > 0:", content_script)
+        self.assertIn("purchase_status='已购买' if detected_price > 0 else '免费'", content_script)
+        self.assertIn("主题页既无购买入口也无正文", content_script)
+        self.assertNotIn("purchase_status not in ('已购买','免费')", content_script)
+        self.assertNotIn("item.get('purchase_status')", content_script)
         self.assertIn('"min_balance": 20', content_script)
         self.assertIn('"download_limit": 3', content_script)
         self.assertIn('"max_pages_per_work": 6', content_script)
@@ -139,6 +145,17 @@ class LibraryDBTests(unittest.TestCase):
         self.assertIn("settle=False", content_script)
         self.assertIn("_time.sleep(2); state=_state()", content_script)
         self.assertNotIn("capture_screenshot()", content_script)
+
+    def test_scanner_and_purchase_state_contract(self) -> None:
+        scan_script = scanner_browser_program(ScanSettings(pages=1))
+        compile(scan_script, "<scan-browser>", "exec")
+        self.assertIn("const priceMatch = text.match(/售价\\s*(\\d+)\\s*金钱/)", scan_script)
+        self.assertIn("price:price", scan_script)
+
+        purchase_script = browser_program([], max_price=3, execute=False)
+        self.assertNotIn("known_status", purchase_script)
+        self.assertIn("state.get('body_nodes', 0) and price > 0", purchase_script)
+        self.assertIn("state.get('body_nodes', 0) else '购买状态未确认'", purchase_script)
 
     def test_automation_browser_is_isolated_and_visible_without_images(self) -> None:
         config = BrowserConfig.from_env()
