@@ -77,6 +77,7 @@ def _verify_purchase(url, attempts=4):
     for attempt in range(1,attempts+1):
         state=_thread_state(); body=(js('document.body?.innerText||""') or '')
         if '余额不足' in body: return '余额不足',state,attempt
+        if any(marker in body for marker in ('主题购买成功','购买成功')): return '已购买',state,attempt
         if state.get('ready') and not state.get('buy'): return '已购买',state,attempt
         if attempt == 1 and not state.get('posts'): _goto(url)
         _time.sleep(0.75 * attempt)
@@ -113,7 +114,10 @@ for item in _cfg['candidates']:
         button=pay.get('button')
         click_at_xy(button['x'] + button['w']/2, button['y'] + button['h']/2)
         _time.sleep(1.5)
-        wait_for_load(timeout=15); wait_for_network_idle(timeout=10,idle_ms=800)
+        try: wait_for_load(timeout=15)
+        except Exception: pass
+        try: wait_for_network_idle(timeout=10,idle_ms=800)
+        except Exception: pass
         verified,after,verify_attempts=_verify_purchase(item['url'])
         purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
         if verified in ('已购买','余额不足'): break
