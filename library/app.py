@@ -117,9 +117,10 @@ PAGE = PAGE.replace('</header>', '<div class="actions service-actions"><button c
 PAGE = PAGE.replace('</body>', '<script>async function stopTask(){const m=$("actionMessage")||$("scanMessage");if(!confirm("确认停止当前购买/下载任务？"))return;try{const r=await fetch("/api/stop-task",{method:"POST"}),d=await r.json();if(m)m.textContent=d.stopped?"已请求停止当前任务":"当前没有正在运行的任务";}catch(e){if(m)m.textContent="停止任务失败："+e.message;}}async function shutdownService(){if(!confirm("确认关闭管理服务？关闭后页面将无法继续操作。"))return;try{const r=await fetch("/api/shutdown",{method:"POST"}),d=await r.json();document.body.innerHTML="<main><section class=\\"card\\"><h2>服务已关闭</h2><p>管理服务已停止，可以关闭此页面。</p></section></main>";}catch(e){document.body.innerHTML="<main><section class=\\"card\\"><h2>服务已关闭</h2><p>管理服务已停止或连接已断开。</p></section></main>";}}</script></body>')
 PAGE = PAGE.replace('</style>', '.service-actions{margin-top:0}.button.danger{color:#9a403d;border-color:#c98e8a}.button.danger:hover{background:#fff0ef}</style>')
 PAGE = PAGE.replace('<button class="button primary" id="auto_download" type="button" onclick="downloadPosts(\'auto\')"><span class="icon">▶</span>自动下载</button>', '<button class="button primary" id="auto_download" type="button" onclick="downloadPosts(\'auto\')"><span class="icon">▶</span>自动下载</button><button class="button" id="retry_failed" type="button" onclick="downloadPosts(\'retry_failed\')"><span class="icon">↻</span>重试所有失败</button>')
-PAGE = PAGE.replace('const count=mode==="redownload"?Math.max(1,Math.min(100,thread_ids.length)):Math.max(1,Math.min(100,Number', 'const count=mode==="redownload"?Math.max(1,Math.min(100,thread_ids.length)):mode==="retry_failed"?1:Math.max(1,Math.min(100,Number')
+PAGE = PAGE.replace('const count=mode==="redownload"?Math.max(1,Math.min(100,thread_ids.length)):Math.max(1,Math.min(100,Number', 'const count=mode==="redownload"?Math.max(1,Math.min(100,thread_ids.length)):mode==="retry_failed"?0:Math.max(1,Math.min(100,Number')
 PAGE = PAGE.replace('const scope=mode==="auto"?"忽略当前筛选并按查看数降序自动下载":mode==="redownload"?"重新抓取勾选帖子的正文":mode==="current"?"下载当前筛选结果":"下载勾选帖子";', 'const scope=mode==="auto"?"忽略当前筛选并按查看数降序自动下载":mode==="redownload"?"重新抓取勾选帖子的正文":mode==="retry_failed"?"重试所有失败帖子":mode==="current"?"下载当前筛选结果":"下载勾选帖子";')
 PAGE = PAGE.replace('message.textContent=mode==="auto"?"正在按查看数自动购买和下载，请保持浏览器登录…":mode==="redownload"?"正在重新购买、抓取和清洗，请保持浏览器登录…":"正在购买、抓取和清洗，请保持浏览器登录…";', 'message.textContent=mode==="auto"?"正在按查看数自动购买和下载，请保持浏览器登录…":mode==="redownload"?"正在重新购买、抓取和清洗，请保持浏览器登录…":mode==="retry_failed"?"正在重试所有失败帖子，请保持浏览器登录…":"正在购买、抓取和清洗，请保持浏览器登录…";')
+PAGE = PAGE.replace('if(!window.confirm(`确认${scope}，共处理 ${count} 篇？单篇不超过 ${max_price} 金币，至少保留 ${min_balance} 金币；单帖最多抓取 ${max_pages_per_work} 页。`))return;', 'if(!window.confirm(mode==="retry_failed"?`确认${scope}？将逐个重试全部失败帖子，仅在余额不足时停止；单帖最多抓取 ${max_pages_per_work} 页。`:`确认${scope}，共处理 ${count} 篇？单篇不超过 ${max_price} 金币，至少保留 ${min_balance} 金币；单帖最多抓取 ${max_pages_per_work} 页。`))return;')
 PAGE = PAGE.replace('x.sort_type==="redownload"?"重新抓取":x.sort_type==="download"', 'x.sort_type==="redownload"?"重新抓取":x.sort_type==="retry_failed"?"重试失败":x.sort_type==="download"')
 # 用户要求隐藏独立购买面板但不要删除；可见流程统一从“下载”启动自动购买。
 PAGE = PAGE.replace('<section class="card purchase-card">', '<section class="card purchase-card" hidden>')
@@ -235,9 +236,12 @@ class Handler(BaseHTTPRequestHandler):
                     with LibraryDB(self.db_path) as db: rows = [row for row in db.list_works() if str(row.get("download_status") or "") in RETRYABLE_DOWNLOAD_STATUSES]
                 else:
                     rows = select_rows(self.db_path, raw_filters, thread_ids if mode in {"selected", "redownload"} else None)
-                count = len(rows) if mode == "retry_failed" else max(1, min(100, int(data.get("count") or len(rows) or 1)))
+                retry_all = mode == "retry_failed"
+                count = len(rows) if retry_all else max(1, min(100, int(data.get("count") or len(rows) or 1)))
                 execute = bool(data.get("execute", False))
-                settings = DownloadSettings(count=max(1, count), max_price=max(0, min(10000, int(data.get("max_price") or 0))), min_balance=max(0, min(1000000, int(data.get("min_balance") or 0))), max_pages_per_work=max(1, min(100, int(data.get("max_pages_per_work") or 6))), minimum_length=max(0, min(100000, int(data.get("minimum_length") or 200))), execute=execute, force=mode in {"redownload", "retry_failed"}, data_root=DATA_ROOT)
+                max_price = 1_000_000 if retry_all else max(0, min(10000, int(data.get("max_price") or 0)))
+                min_balance = 0 if retry_all else max(0, min(1000000, int(data.get("min_balance") or 0)))
+                settings = DownloadSettings(count=max(1, count), max_price=max_price, min_balance=min_balance, max_pages_per_work=max(1, min(100, int(data.get("max_pages_per_work") or 6))), minimum_length=max(0, min(100000, int(data.get("minimum_length") or 200))), execute=execute, force=retry_all or mode == "redownload", data_root=DATA_ROOT)
                 with LibraryDB(self.db_path) as db:
                     for row in rows:
                         if not settings.force and row.get("download_status") != "已下载" and not row.get("local_path"):

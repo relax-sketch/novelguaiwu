@@ -86,6 +86,7 @@ class LibraryDBTests(unittest.TestCase):
             self.assertIn("重新抓取勾选正文", PAGE)
             self.assertIn("重试所有失败", PAGE)
             self.assertIn("downloadPosts('retry_failed')", PAGE)
+            self.assertIn("仅在余额不足时停止", PAGE)
             self.assertIn('downloadPosts(\'redownload\')', PAGE)
             self.assertIn('onclick="pickRange(event,${i})"', PAGE)
             self.assertIn('按住 Shift 可连续选择', PAGE)
