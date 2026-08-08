@@ -22,6 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "runtime" / "library.sqlite3"
 DATA_ROOT = ROOT / "data"
 EXPORT_ROOT = ROOT / "exports"
+
+
+def _is_client_disconnect(exc: BaseException) -> bool:
+    """判断 HTTP 客户端断开，避免把响应写失败当成下载批次失败。"""
+    if isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+        return True
+    return getattr(exc, "winerror", None) in {10053, 10054} or getattr(exc, "errno", None) in {10053, 10054}
+
+
 # 版块顶部的 typeid 过滤项是网站预设标签；列表页只会显示当前页出现过的标签，
 # 因此管理页使用这份从 fid=3 顶部菜单核对出的完整预设集合。
 FORUM_TAG_PRESETS = [
@@ -257,18 +266,23 @@ class Handler(BaseHTTPRequestHandler):
                     db.finish_run(run_id, downloaded_count=downloaded, failed_count=failed, skipped_count=skipped, stop_reason=stop_reason, results=summarize_run_results(results))
                 self._send(json.dumps({"results": results, "execute": execute, "mode": mode, "queued": len(results), "downloaded": downloaded, "failed": failed, "skipped": skipped, "stop_reason": stop_reason}, ensure_ascii=False), content_type="application/json; charset=utf-8")
             except Exception as exc:
+                if _is_client_disconnect(exc):
+                    append_log("client_disconnect", path=path, run_id=run_id, error=repr(exc))
+                    # 任务结果已经由逐帖回调写入；这里只是客户端没有继续接收 HTTP 响应。
+                    # 不能把未返回给客户端的数据库行批量改成失败。
+                    return
                 append_log("app_error", path=path, run_id=run_id, error=repr(exc))
                 if run_id is not None:
-                    # 浏览器进程级异常可能发生在某个帖子结果返回之前；将尚未
-                    # 返回结果的队列项逐帖标记失败，避免继续显示为“已下载”。
-                    pending_rows = [row for row in locals().get("rows", []) if str(row.get("thread_id") or "") not in locals().get("persisted_thread_ids", set())]
-                    if pending_rows:
-                        pending_results = [{"thread_id": str(row.get("thread_id") or ""), "status": "页面异常", "reason": f"批次异常：{type(exc).__name__}", "price": row.get("price"), "purchase_status": "页面异常"} for row in pending_rows]
-                        persist_download_results(self.db_path, pending_results)
-                        streamed_results.extend(pending_results)
+                    # 单帖结果已经在回调中逐帖写回；批次异常时不再凭“没有返回”
+                    # 推断其他帖子失败，避免把未访问的整批记录覆盖成页面异常。
+                    streamed_results = locals().get("streamed_results", [])
+                    streamed_counts = locals().get("streamed_counts", {})
                     with LibraryDB(self.db_path) as db:
-                        db.finish_run(run_id, failed_count=max(1, len(pending_rows)), stop_reason=f"页面异常：{type(exc).__name__}", results=summarize_run_results(streamed_results))
-                self._send(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), 500, "application/json; charset=utf-8")
+                        db.finish_run(run_id, downloaded_count=int(streamed_counts.get("downloaded", 0)), failed_count=int(streamed_counts.get("failed", 0)), skipped_count=int(streamed_counts.get("skipped", 0)), stop_reason=f"页面异常：{type(exc).__name__}", results=summarize_run_results(streamed_results))
+                try:
+                    self._send(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), 500, "application/json; charset=utf-8")
+                except Exception as response_exc:
+                    append_log("error_response_send_failed", path=path, run_id=run_id, error=repr(response_exc))
             return
         if path == "/api/export":
             try:

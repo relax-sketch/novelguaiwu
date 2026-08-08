@@ -6,7 +6,7 @@ from pathlib import Path
 
 from library.db import LibraryDB, WorkFilter
 from library.scanner import ScanSettings, browser_program as scanner_browser_program, load_fixture, normalize_works
-from library.app import FORUM_TAG_PRESETS, PAGE
+from library.app import FORUM_TAG_PRESETS, PAGE, _is_client_disconnect
 from library.purchase import SKIP_PURCHASE_TAGS, PurchaseCandidate, browser_program
 from library.cleaner import clean_posts, clean_text
 from library.content import clean_filename, save_snapshot
@@ -87,6 +87,12 @@ class LibraryDBTests(unittest.TestCase):
             self.assertIn('downloadPosts(\'redownload\')', PAGE)
             self.assertIn('onclick="pickRange(event,${i})"', PAGE)
             self.assertIn('按住 Shift 可连续选择', PAGE)
+
+    def test_client_disconnect_is_not_a_task_failure(self) -> None:
+        self.assertTrue(_is_client_disconnect(ConnectionAbortedError(10053)))
+        self.assertTrue(_is_client_disconnect(ConnectionResetError(10054)))
+        self.assertTrue(_is_client_disconnect(BrokenPipeError()))
+        self.assertFalse(_is_client_disconnect(RuntimeError("browser failed")))
 
     def test_purchase_program_is_dry_run_by_default(self) -> None:
         script = browser_program([PurchaseCandidate("802", "https://example.test/thread/802")], max_price=3, execute=False, count=2)

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 runtime/*.sqlite3
 runtime/*.sqlite3-journal
+runtime/*.bak
 runtime/*.png
 runtime/*.json
 runtime/*.txt
