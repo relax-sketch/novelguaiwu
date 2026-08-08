@@ -119,7 +119,7 @@ class LibraryDBTests(unittest.TestCase):
         self.assertIn("p['author_id']==author_id", content_script)
         self.assertIn("余额不足", content_script)
         self.assertIn("页面异常", content_script)
-        self.assertIn("else '免费'", content_script)
+        self.assertIn("purchase_status='免费'", content_script)
         self.assertIn('"min_balance": 20', content_script)
         self.assertIn('"download_limit": 3', content_script)
         self.assertIn('"max_pages_per_work": 6', content_script)

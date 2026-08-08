@@ -57,10 +57,13 @@ def _load_thread(url, attempts=3, settle=False):
         _goto(url)
         for delay in (0.75,1.5,2.25):
             _time.sleep(delay)
-            state=_state()
-            if state.get('ready'):
+            candidate=_state(); state=candidate
+            if candidate.get('ready') and candidate.get('buy'):
                 if settle: _time.sleep(2)
-                return state,attempt
+                return candidate,attempt
+        if state.get('ready'):
+            if settle and state.get('buy'): _time.sleep(2)
+            return state,attempt
     return state,attempts
 def _load_pay(url, attempts=1):
     pay={{'form':False,'button':None,'price':0,'balance':0,'body':''}}
@@ -120,7 +123,9 @@ for item in _cfg['candidates']:
         _time.sleep(2); state=_state()
         purchase_status='已购买'
     elif purchase_status not in ('已购买','免费'):
-        purchase_status='已购买' if detected_price>0 or purchase_status in ('购买失败','余额不足','金币超限') else '免费'
+        if detected_price > 0 or purchase_status in ('购买失败','余额不足','金币超限'):
+            _emit({{'thread_id':item['thread_id'],'status':'页面异常','reason':'主题页未确认购买链接，拒绝将收费帖标记为已完成','attempts':{{'thread':thread_attempts}},'price':detected_price,'purchase_status':'购买状态未确认','posts':[]}}); continue
+        purchase_status='免费'
     author_id=state['author_id']; existing=item.get('existing_posts') or []; known={{str(p.get('remote_post_id') or '') for p in existing}}
     resume_page=max([int(p.get('page_number') or 1) for p in existing] or [1]); page_limit=max(1,int(_cfg['max_pages_per_work'])); effective_page_count=min(int(state['page_count']),page_limit)
     all_rows=[dict(p,page_number=1) for p in state['rows'] if str(p.get('remote_post_id') or '') not in known]

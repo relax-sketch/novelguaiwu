@@ -68,10 +68,12 @@ def _load_thread(url, attempts=3):
         _goto(url)
         for delay in (0.75,1.5,2.25):
             _time.sleep(delay)
-            state=_thread_state()
-            if state.get('ready'):
+            candidate=_thread_state(); state=candidate
+            if candidate.get('ready') and candidate.get('buy'):
                 _time.sleep(2)
-                return state,attempt
+                return candidate,attempt
+        if state.get('ready'):
+            return state,attempt
     return state,attempts
 def _load_pay(url, attempts=1):
     pay={{'form':False,'button':None,'price':0,'balance':0}}
@@ -100,10 +102,12 @@ for item in _cfg['candidates']:
             if not state.get('posts'):
                 purchase_attempts.append({{'attempt':purchase_attempt,'thread':thread_attempts,'status':'主题页楼层未出现'}}); continue
             if not state.get('buy'):
-                resolved='已购买' if known_price>0 or known_status in ('已购买','购买失败','余额不足','金币超限') else '免费'
+                resolved='已购买' if known_status=='已购买' else ('免费' if known_price==0 and known_status=='未购买' else '购买状态未确认')
                 if resolved=='免费':
                     _emit({{'thread_id':item['thread_id'],'status':'免费','price':known_price,'reason':'主题页没有购买链接','attempts':{{'purchase':purchase_attempts,'thread':thread_attempts}},'title':state.get('title',''),'purchased':False}})
                     verified=resolved; break
+                if resolved=='购买状态未确认':
+                    _emit({{'thread_id':item['thread_id'],'status':'购买状态未确认','price':known_price,'reason':'主题页未确认购买链接，未执行购买','attempts':{{'purchase':purchase_attempts,'thread':thread_attempts}},'title':state.get('title',''),'purchased':False}}); verified=resolved; break
                 verified='已购买'; break
             _log({{'event':'pay_start','thread_id':item['thread_id'],'attempt':purchase_attempt,'url':state['buy']['href']}})
             pay,pay_attempts=_load_pay(state['buy']['href']); price=int(pay.get('price') or price)
@@ -126,7 +130,7 @@ for item in _cfg['candidates']:
         _emit({{'thread_id':item['thread_id'],'status':'余额不足','price':price,'purchased':False,'reason':'提交后页面提示余额不足','attempts':{{'thread':thread_attempts,'purchase':purchase_attempts}}}}); break
     if verified=='余额保留':
         _emit({{'thread_id':item['thread_id'],'status':'余额保留','price':price,'purchased':False,'reason':'购买后余额将低于最低保留余额','attempts':{{'purchase':purchase_attempts}}}}); break
-    if verified in ('金币超限','免费','待购买'): continue
+    if verified in ('金币超限','免费','待购买','购买状态未确认'): continue
     if verified!='已购买':
         _emit({{'thread_id':item['thread_id'],'status':'购买失败','price':price,'purchased':False,'reason':'付款按钮点击后仍未确认购买，已重试3次','attempts':{{'thread':thread_attempts,'purchase':purchase_attempts}}}}); continue
     _bought += 1
