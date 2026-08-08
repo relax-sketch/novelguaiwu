@@ -7,5 +7,6 @@ runtime/*.png
 runtime/*.json
 runtime/*.txt
 runtime/screenshots/
+runtime/logs/
 data/
 exports/

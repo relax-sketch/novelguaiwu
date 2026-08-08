@@ -35,6 +35,7 @@ uv run python -m library.app --db runtime/library.sqlite3 serve --open
 - 单篇最高金币、最低保留余额、单帖最多页数限制
 - 导出合并 TXT 或包含独立 TXT 文件的 ZIP
 - 最近运行记录和失败原因
+- 浏览器自动化实时日志：`runtime/logs/browser-harness.log`（JSON Lines，可用 `Get-Content runtime/logs/browser-harness.log -Wait` 追踪）
 
 下载按钮会访问网页并可能扣除金币；确认前请检查下载篇数、金币限制和余额设置。
 

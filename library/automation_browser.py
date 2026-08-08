@@ -19,6 +19,8 @@ from typing import Any, Mapping
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from .automation_log import LOG_PATH, append_log
+
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
@@ -125,8 +127,11 @@ def ensure_browser(config: BrowserConfig | None = None) -> BrowserConfig:
 def run_harness(program: str, *, timeout: int, config: BrowserConfig | None = None) -> subprocess.CompletedProcess[str]:
     config = ensure_browser(config)
     env = config.child_env()
+    env["LIBRARY_AUTOMATION_LOG"] = str(LOG_PATH)
     command = ["uv", "run", "browser-harness"]
+    append_log("harness_start", timeout=timeout, daemon=config.daemon_name, program_bytes=len(program.encode("utf-8")))
     proc = subprocess.run(command, input=program, text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=timeout, env=env)
+    append_log("harness_end", returncode=proc.returncode, stdout_bytes=len(proc.stdout.encode("utf-8")), stderr_tail=proc.stderr[-1000:])
     if proc.returncode and "PermissionError" in proc.stderr and f"bu-{config.daemon_name}.port" in proc.stderr:
         # 只重载当前项目的隔离 daemon；不删除或触碰其他项目的状态。
         subprocess.run([*command, "--reload"], text=True, encoding="utf-8", cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=30, env=env)

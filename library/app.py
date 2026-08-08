@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from .db import LibraryDB, WorkFilter
 from .downloader import DownloadSettings, run_download
 from .exporter import export_txt, export_zip
+from .automation_log import append_log
 from .purchase import SKIP_PURCHASE_TAGS, PurchaseCandidate, run_purchase
 from .scanner import ScanSettings, load_fixture, normalize_works, scan_with_browser
 
@@ -226,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                     db.finish_run(run_id, downloaded_count=downloaded, failed_count=failed, skipped_count=skipped, stop_reason=stop_reason, results=summarize_run_results(results))
                 self._send(json.dumps({"results": results, "execute": execute, "mode": mode, "queued": len(results), "downloaded": downloaded, "failed": failed, "skipped": skipped, "stop_reason": stop_reason}, ensure_ascii=False), content_type="application/json; charset=utf-8")
             except Exception as exc:
+                append_log("app_error", path=path, run_id=run_id, error=repr(exc))
                 if run_id is not None:
                     with LibraryDB(self.db_path) as db: db.finish_run(run_id, failed_count=1, stop_reason=f"页面异常：{type(exc).__name__}")
                 self._send(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), 500, "application/json; charset=utf-8")

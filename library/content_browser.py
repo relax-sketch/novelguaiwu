@@ -14,8 +14,17 @@ def browser_program(candidates: Iterable[dict[str, Any]], *, execute: bool, max_
     return fr'''
 import json as _json
 import time as _time
+import os as _os
 _cfg=_json.loads({config!r}); _marker={MARKER!r}; _started=False; _downloaded=0
-def _emit(x): print(_marker+_json.dumps(x,ensure_ascii=False),flush=True)
+_log_path=_os.environ.get('LIBRARY_AUTOMATION_LOG','')
+def _log(x):
+    if not _log_path: return
+    try:
+        with open(_log_path,'a',encoding='utf-8') as _fh: _fh.write(_json.dumps(x,ensure_ascii=False)+'\\n'); _fh.flush()
+    except Exception: pass
+def _emit(x):
+    _log({{'event':'browser_result', **x}})
+    print(_marker+_json.dumps(x,ensure_ascii=False),flush=True)
 def _goto(url):
     global _started
     if _started: goto_url(url)
@@ -96,9 +105,9 @@ for item in _cfg['candidates']:
                     verified='余额不足'; purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':0,'status':'余额不足'}}); break
             button=pay['button']; click_at_xy(button['x']+button['w']/2,pay['button']['y']+pay['button']['h']/2); _time.sleep(1.5)
             try: wait_for_load(timeout=15)
-            except Exception: pass
+            except Exception as _exc: _log({{'event':'wait_for_load_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
             try: wait_for_network_idle(timeout=10,idle_ms=800)
-            except Exception: pass
+            except Exception as _exc: _log({{'event':'wait_for_network_idle_error','thread_id':item['thread_id'],'attempt':purchase_attempt,'error':repr(_exc)}})
             verified,state,verify_attempts=_verify_purchase(item['url']); purchase_attempts.append({{'attempt':purchase_attempt,'pay':pay_attempts,'verify':verify_attempts,'status':verified}})
             if verified in ('已购买','余额不足'): break
             _time.sleep(1.0)
