@@ -130,9 +130,8 @@ class LibraryDB:
         columns = {str(row["name"]) for row in self.connection.execute("PRAGMA table_info(runs)").fetchall()}
         if "result_json" not in columns:
             self.connection.execute("ALTER TABLE runs ADD COLUMN result_json TEXT NOT NULL DEFAULT '[]'")
-        # 完整本地快照是最终判定：后续扫描只更新排名/元数据，不把作品重新放回下载队列。
-        self.connection.execute("UPDATE works SET download_status='已下载',has_update=0 WHERE local_path<>''")
-        self.connection.commit()
+        # 不根据 local_path 强制覆盖下载状态。重新抓取失败时需要保留
+        # “页面异常/下载失败”等可重试状态；扫描逻辑本身会继续保护已有快照。
 
     def close(self) -> None:
         self.connection.close()
